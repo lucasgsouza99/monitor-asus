@@ -37,7 +37,7 @@ def extrair_ofertas():
     }
     ofertas = []
     
-    # Tenta primeiro a página do produto com todas as lojas
+    # 1. Página do produto com todas as lojas
     req = urllib.request.Request(URL_BUSCAPE_PRODUTO, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
@@ -54,6 +54,10 @@ def extrair_ofertas():
                 centavos = num_match.group(2)
                 preco = float(f"{inteiro}.{centavos}")
                 
+                # Extrai proposta de parcelamento (ex: 10x de R$ 199,99)
+                parc_match = re.search(r"(\d{1,2}x\s+de\s+R\$\s*[\d\.,]+)", card_text, re.IGNORECASE)
+                parcelamento = parc_match.group(1) if parc_match else "Consulte condições no site"
+
                 # Identifica loja
                 loja = "Loja parceira"
                 for cand in ["KaBuM!", "Magazine Luiza", "Amazon", "Pichau", "Terabyte", "Mercado Livre", "Girafa", "Fast Shop", "Casas Bahia"]:
@@ -64,11 +68,16 @@ def extrair_ofertas():
                 link_tag = card.select_one("a[href]")
                 href_val = link_tag.get("href") if link_tag else ""
                 link = f"https://www.buscape.com.br{href_val}" if href_val.startswith("/") else URL_BUSCAPE_PRODUTO
-                ofertas.append({"loja": loja, "preco": preco, "link": link})
+                ofertas.append({
+                    "loja": loja,
+                    "preco": preco,
+                    "parcelamento": parcelamento,
+                    "link": link
+                })
     except Exception as e:
         print("Aviso ao acessar pagina do produto:", e)
 
-    # Se a lista direta falhar, usa a busca geral
+    # 2. Busca geral (contingência)
     if not ofertas:
         req_b = urllib.request.Request(URL_BUSCAPE_BUSCA, headers=headers)
         try:
@@ -81,9 +90,16 @@ def extrair_ofertas():
                         num_match = re.search(r"R\$\s*([\d\.]+),(\d{2})", txt)
                         if num_match:
                             val = float(f"{num_match.group(1).replace('.', '')}.{num_match.group(2)}")
+                            parc_match = re.search(r"(\d{1,2}x\s+de\s+R\$\s*[\d\.,]+)", txt, re.IGNORECASE)
+                            parc = parc_match.group(1) if parc_match else "Consulte parcelamento"
                             href = card.get("href")
                             link = f"https://www.buscape.com.br{href}" if href.startswith("/") else URL_BUSCAPE_BUSCA
-                            ofertas.append({"loja": "Melhor Oferta", "preco": val, "link": link})
+                            ofertas.append({
+                                "loja": "Melhor Oferta",
+                                "preco": val,
+                                "parcelamento": parc,
+                                "link": link
+                            })
         except Exception as e:
             print("Erro na busca de contingencia:", e)
             
@@ -95,14 +111,15 @@ def main():
         print("Nenhuma oferta encontrada nesta checagem.")
         return
 
-    # Ordena para pegar a mais barata
+    # Ordena pelo menor preço à vista
     ofertas.sort(key=lambda x: x["preco"])
     melhor = ofertas[0]
     preco_atual = melhor["preco"]
+    parcelamento_atual = melhor["parcelamento"]
     loja_atual = melhor["loja"]
     link_atual = melhor["link"]
     
-    print(f"Menor preco encontrado: R$ {preco_atual:.2f} na {loja_atual}")
+    print(f"Menor preco: R$ {preco_atual:.2f} ({parcelamento_atual}) na {loja_atual}")
 
     # Leitura do histórico anterior
     historico = {}
@@ -115,10 +132,11 @@ def main():
 
     menor_historico = historico.get("menor_preco")
 
-    # Primeira execução: registra o baseline e envia boas-vindas com o preço atual
+    # Primeira execução (ou se não houver histórico salvo)
     if menor_historico is None:
         historico = {
             "menor_preco": preco_atual,
+            "parcelamento": parcelamento_atual,
             "loja": loja_atual,
             "data": datetime.now().strftime("%d/%m/%Y %H:%M")
         }
@@ -126,38 +144,41 @@ def main():
             json.dump(historico, f, indent=2)
             
         msg = (
-            f"🤖 *Monitor Ativado com Sucesso!*\n\n"
-            f"Estou monitorando 24h o monitor *ASUS TUF VG34WQML5A*.\n\n"
-            f"📊 *Preço base atual:* R$ {preco_atual:,.2f}\n"
+            f"🤖 *Monitor Ativado com Condições de Pagamento!*\n\n"
+            f"Monitorando 24h o *ASUS TUF VG34WQML5A*.\n\n"
+            f"💵 *À vista:* R$ {preco_atual:,.2f}\n"
+            f"💳 *Parcelado:* {parcelamento_atual}\n"
             f"🏪 *Loja:* {loja_atual}\n\n"
-            f"🔗 [Ver Oferta Atual]({link_atual})\n\n"
-            f"🔔 _Você receberá um novo alerta assim que o preço cair!_"
+            f"🔗 [Acessar Oferta Direta]({link_atual})\n\n"
+            f"🔔 _Avisarei assim que houver qualquer queda de preço!_"
         )
         enviar_telegram(msg)
         return
 
-    # Execuções seguintes: só alerta se o preço cair!
+    # Alerta de queda de preço
     if preco_atual < menor_historico:
         economia = menor_historico - preco_atual
         msg = (
             f"🚨 *QUEDA DE PREÇO DETECTADA!* 🚨\n\n"
-            f"O monitor *ASUS TUF VG34WQML5A* baixou de valor!\n\n"
+            f"O monitor *ASUS TUF VG34WQML5A* acabou de baixar!\n\n"
             f"❌ *Antes:* R$ {menor_historico:,.2f}\n"
-            f"✅ *Agora:* R$ {preco_atual:,.2f}\n"
-            f"📉 *Economia de:* R$ {economia:,.2f}\n"
+            f"💵 *Novo valor à vista:* R$ {preco_atual:,.2f}\n"
+            f"💳 *Condição parcelada:* {parcelamento_atual}\n"
+            f"📉 *Economia:* R$ {economia:,.2f}\n"
             f"🏪 *Loja:* {loja_atual}\n\n"
             f"🔗 [IR DIRETO PARA A OFERTA]({link_atual})"
         )
         enviar_telegram(msg)
 
-        # Atualiza histórico com o novo recorde
+        # Atualiza histórico
         historico["menor_preco"] = preco_atual
+        historico["parcelamento"] = parcelamento_atual
         historico["loja"] = loja_atual
         historico["data"] = datetime.now().strftime("%d/%m/%Y %H:%M")
         with open(HISTORICO_FILE, "w", encoding="utf-8") as f:
             json.dump(historico, f, indent=2)
     else:
-        print(f"Preco estavel (Atual: R$ {preco_atual:.2f} | Menor registrado: R$ {menor_historico:.2f}). Nenhum alerta necessario.")
+        print(f"Preco estavel (Atual: R$ {preco_atual:.2f} | Menor registrado: R$ {menor_historico:.2f}).")
 
 if __name__ == "__main__":
     main()

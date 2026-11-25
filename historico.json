@@ -1,5 +1,14 @@
 {
-  "menor_preco": 1799.99,
-  "loja": "KaBuM!",
-  "data": "25/11/2026 18:06"
+  "asus_vg34": {
+    "menor_preco": 1799.99,
+    "loja": "KaBuM!",
+    "data": "25/11/2026 18:06"
+  },
+  "pelando_links": [],
+  "lg_34g600a": {
+    "menor_preco": 1846.41,
+    "parcelamento": "8x de R$ 238,49",
+    "loja": "Webcontinental",
+    "data": "25/11/2026 19:03"
+  }
 }
